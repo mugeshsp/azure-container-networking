@@ -98,8 +98,8 @@ jobs:
           echo "full_tag=$FULL_TAG" >> "$GITHUB_OUTPUT"
           echo "Validated request for $FULL_TAG on $TARGET_REF ($TARGET_SHA)"
 
-  create_tag:
-    name: Create Tag (Approval Required)
+  approve_tag:
+    name: Approve Tag
     runs-on: ubuntu-latest
     needs: validate
     # Operational requirement:
@@ -115,6 +115,14 @@ jobs:
     concurrency:
       group: release-tag-${{ inputs.tag_prefix }}-${{ inputs.tag_name }}
       cancel-in-progress: false
+    steps:
+      - name: Echo tag
+        run: echo $FULL_TAG
+
+  create_tag:
+    name: Create and Push Tag
+    runs-on: ubuntu-latest
+    needs: approve_tag
     steps:
       - name: Checkout target commit
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
