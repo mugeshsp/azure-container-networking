@@ -124,6 +124,8 @@ jobs:
   create_tag:
     name: Create and Push Tag
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - validate
       - approve_tag
