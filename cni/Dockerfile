@@ -9,7 +9,7 @@ ARG OS
 FROM --platform=linux/${ARCH} mcr.microsoft.com/oss/go/microsoft/golang@sha256:bc7423b52b62e8f0281b5f7f564eb1862dc315bc57e1373c6a81e87ef3ac39ab AS go
 
 # mcr.microsoft.com/azurelinux/base/core:3.0
-FROM --platform=linux/${ARCH} mcr.microsoft.com/azurelinux/base/core@sha256:35149ae8dd179684f969944f54a337c665a64e702486154eb44253fb39c2505b AS mariner-core
+FROM --platform=linux/${ARCH} mcr.microsoft.com/azurelinux/base/core@sha256:0cdd0c6a200fc2b5d6da711c34228126034bd428650b43dfb7e378214e6f2d32 AS mariner-core
 
 FROM go AS azure-vnet
 ARG OS
@@ -24,7 +24,7 @@ RUN GOOS=$OS CGO_ENABLED=0 go build -a -o /go/bin/azure-vnet-ipam -trimpath -ldf
 RUN GOOS=$OS CGO_ENABLED=0 go build -a -o /go/bin/azure-vnet-stateless -trimpath -ldflags "-s -w -X main.version="$VERSION"" -gcflags="-dwarflocationlists=true" cni/network/stateless/main.go
 RUN GOOS=$OS CGO_ENABLED=0 go build -a -o /go/bin/azure-cni-telemetry-sidecar -trimpath -ldflags "-s -w -X main.version="$VERSION" -X "$CNI_AI_PATH"="$CNI_AI_ID"" -gcflags="-dwarflocationlists=true" ./cns/cni-telemetry-sidecar
 
-FROM mariner-core AS compressor
+FROM mariner-core AS payload
 ARG OS
 WORKDIR /payload
 COPY --from=azure-vnet /go/bin/* /payload/
@@ -36,6 +36,8 @@ COPY --from=azure-vnet /azure-container-networking/cni/azure-$OS-swift-overlay-d
 COPY --from=azure-vnet /azure-container-networking/cni/azure-windows-multitenancy.conflist /payload/azure-multitenancy.conflist
 COPY --from=azure-vnet /azure-container-networking/cni/azure-chained-cilium.conflist /payload/azure-chained-cilium.conflist
 COPY --from=azure-vnet /azure-container-networking/telemetry/azure-vnet-telemetry.config /payload/azure-vnet-telemetry.config
+
+FROM payload AS compressor
 RUN cd /payload && sha256sum * > sum.txt
 RUN gzip --verbose --best --recursive /payload && for f in /payload/*.gz; do mv -- "$f" "${f%%.gz}"; done
 
@@ -56,8 +58,14 @@ COPY --from=dropgz /go/bin/dropgz dropgz
 ENTRYPOINT [ "/dropgz" ]
 
 # mcr.microsoft.com/oss/kubernetes/windows-host-process-containers-base-image:v1.0.0
-FROM --platform=windows/${ARCH} mcr.microsoft.com/oss/kubernetes/windows-host-process-containers-base-image@sha256:b4c9637e032f667c52d1eccfa31ad8c63f1b035e8639f3f48a510536bf34032b as hpc
+FROM --platform=windows/${ARCH} mcr.microsoft.com/oss/kubernetes/windows-host-process-containers-base-image@sha256:b4c9637e032f667c52d1eccfa31ad8c63f1b035e8639f3f48a510536bf34032b AS hpc
 
-FROM hpc as windows
-COPY --from=dropgz /go/bin/dropgz dropgz.exe
-ENTRYPOINT [ "/dropgz.exe" ]
+FROM hpc AS windows
+COPY --from=azure-vnet /go/bin/azure-vnet /azure-vnet.exe
+COPY --from=azure-vnet /go/bin/azure-vnet-stateless /azure-vnet-stateless.exe
+COPY --from=azure-vnet /go/bin/azure-vnet-ipam /azure-vnet-ipam.exe
+COPY --from=azure-vnet /go/bin/azure-vnet-telemetry /azure-vnet-telemetry.exe
+COPY --from=azure-vnet /go/bin/azure-cni-telemetry-sidecar /azure-cni-telemetry-sidecar.exe
+COPY --from=payload /payload/*.conflist /
+COPY --from=payload /payload/azure-vnet-telemetry.config /azure-vnet-telemetry.config
+ENTRYPOINT [ "powershell.exe" ]
